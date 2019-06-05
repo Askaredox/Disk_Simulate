@@ -1,0 +1,11 @@
+# depslib dependency file v1.0
+1559713498 source:/home/askar/Documents/Pruebas/Practica1/main.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+
+1559698627 source:/home/askar/Documents/Pruebas/Practica1/src/Token.cpp
+	"Token.h"
+
+1559699708 /home/askar/Documents/Pruebas/Practica1/include/Token.h
+
