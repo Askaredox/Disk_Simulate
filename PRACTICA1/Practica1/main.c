@@ -8,7 +8,7 @@
 typedef enum { false, true } bool;
 struct stat st;
 
-struct part{
+struct Part{
     int status;
     char type;
     char fit;
@@ -19,10 +19,10 @@ struct part{
 
 struct mbr{
     int size;
-    char *time;
+    char time[100];
     int id;
     char fit;
-    struct part partition[4];
+    struct Part partition[5];
 };
 
 struct ebr{
@@ -78,13 +78,14 @@ int analize(char *str){
     for(int i=0;i<20;i++) limpiar(strs[i]);
     while(ptr != NULL){
         strcpy(strs[j],ptr);
-        if(strs[j][0]==39){
-            ptr=strtok(NULL,delim);
-            if(ptr==NULL){
-                j++;break;
+        int temp=strlen(strs[j]);
+        if(strs[j][0]==39 && strs[j][temp-1]!=39){
+            while(strs[j][temp-1]!=39){
+                ptr=strtok(NULL,delim);
+                strcat(strs[j]," ");
+                strcat(strs[j],ptr);
+                temp=strlen(strs[j]);
             }
-            strcat(strs[j]," ");
-            strcat(strs[j],ptr);
         }
         ptr=strtok(NULL,delim);
         j++;
@@ -320,9 +321,9 @@ int crear_disco(int size, char fit, int unit, char path[256]){
         return errR("mkdisk","cant create disk");
     }
     int mult=1;
-    if(unit==1) mult=1000;
-    char UwU[size*1000*mult];
-    for(int i=0;i<size*1000*mult;i++)
+    if(unit==1) mult=1024;
+    char UwU[size*1024*mult];
+    for(int i=0;i<size*1024*mult;i++)
         UwU[i]=0x0;
     fwrite(UwU,1,sizeof(UwU),disco);
 
@@ -331,8 +332,8 @@ int crear_disco(int size, char fit, int unit, char path[256]){
     time_str[strlen(time_str)-1] = '\0';
 
     struct mbr mabore;
-    mabore.size=size*1000*mult;
-    mabore.time=time_str;
+    mabore.size=size*1024*mult;
+    strcpy(mabore.time,time_str);
     mabore.fit=fit;
     mabore.id=(rand()%1000)+1;
 
@@ -342,8 +343,7 @@ int crear_disco(int size, char fit, int unit, char path[256]){
     printf("fit: %c \n",mabore.fit);
     printf("id: %i \n",mabore.id);
 
-    fseek(disco,0,SEEK_SET);
-    fwrite(&mabore,sizeof(mabore),1,disco);
+    escribir_mabore(&mabore,disco);
     fclose(disco);
 
     printf("****************************** DISCO CREADO ******************************\n\n");
@@ -354,37 +354,198 @@ int crear_part(int size, char fit, int unit, char type, char path[256], char nam
     struct mbr mabore;
     for(int i=1;i<strlen(path);i++)
         if(path[i]==' ') path[i]='_';
-    if((fich = fopen(path,"rb"))==NULL){
+    if((fich = fopen(path,"rb+"))==NULL){
         if(fich !=NULL) fclose(fich);
         return errR("fdisk","cant open disk");
     }
     fread(&mabore,sizeof(mabore),1,fich);
-    struct part particion;
+    struct Part particion;
     particion.status=1;
     particion.type=type;
     particion.fit=fit;
-    particion.start=get_pos(particion,mabore);
-    particion.size=size;
+    int temp;
+    if(unit==0) temp=1;
+    else if(unit==1)temp=1024;
+    else if(unit==2)temp=1024*1024;
+    particion.size=size*temp;
+    if(particion.type=='E')
+        for(int i=0;i<4;i++){
+            if(mabore.partition[i].type=='E')
+                return errR("fdisk","already an Expanded partition allocated");
+        }
+    if(mabore.partition[3].status==1)
+        return errR("fdisk","already an 4 partitions allocated");
     strcpy(particion.name,name);
+    if(set_pos(particion,&mabore)!=0){
+        return 1;
+    }
+    //printf("fit: %c \n",mabore.fit);
+    //printf("id: %i \n",mabore.id);
+
+    escribir_mabore(&mabore,fich);
+
     fclose(fich);
     return 0;
 }
-int get_pos(struct part particion,struct mbr mabore){
-    if(mabore.partition[0].status==0){
-        mabore.partition[0]=particion;
-        return sizeof(mabore);
-    }
-    else if(mabore.partition[1].status==0){
 
+int set_pos(struct Part particion,struct mbr *mabore){
+    int size_ant=sizeof(*mabore);
+    if(mabore->fit=='F'){
+        for(int i=0;i<5;i++){
+            if(mabore->partition[i].status!=0){
+                if(mabore->partition[i].start-size_ant>particion.size){
+                    particion.start=size_ant;
+                    mabore->partition[4]=particion;
+                    break;
+                }
+                else{
+                    size_ant=mabore->partition[i].start+mabore->partition[i].size;
+                }
+            }
+            else{
+                if(mabore->size-size_ant>particion.size){
+                    particion.start=size_ant;
+                    mabore->partition[4]=particion;
+                    break;
+                }
+                else{
+                    return errR("fdisk","not enough space in disk");
+                }
+            }
+        }
     }
+    else if(mabore->fit=='W'){
+        int space=0;
+        int start_space=size_ant;
+        for(int i=0;i<5;i++){
+            if(mabore->partition[i].status!=0){
+                if(mabore->partition[i].start-size_ant>particion.size && space<mabore->partition[i].start-size_ant){
+                    space=mabore->partition[i].start-size_ant;
+                    start_space=size_ant;
+                }
+                size_ant=mabore->partition[i].start+mabore->partition[i].size;
+            }
+            else{
+                if(mabore->size-size_ant>particion.size && space<mabore->size-size_ant){
+                    space=mabore->size-size_ant;
+                    start_space=size_ant;
+                }
+            }
+        }
+        if(space!=0){
+            particion.start=start_space;
+            mabore->partition[4]=particion;
+        }
+        else return errR("fdisk","not enough space in disk");
+    }
+    else if(mabore->fit=='B'){
+        int space=0x7fffffff;
+        int start_space=size_ant;
+        for(int i=0;i<5;i++){
+            if(mabore->partition[i].status!=0){
+                if(mabore->partition[i].start-size_ant>particion.size && space>mabore->partition[i].start-size_ant){
+                    space=mabore->partition[i].start-size_ant;
+                    start_space=size_ant;
+                }
+                size_ant=mabore->partition[i].start+mabore->partition[i].size;
+            }
+            else{
+                if(mabore->size-size_ant>particion.size && space>mabore->size-size_ant){
+                    space=mabore->size-size_ant;
+                    start_space=size_ant;
+                }
+            }
+        }
+        if(space!=0x7fffffff){
+            particion.start=start_space;
+            mabore->partition[4]=particion;
+        }
+        else return errR("fdisk","not enough space in disk");
+    }
+    struct Part k;
+    for(int i=1;i<5;i++){
+        for(int j=0;j<4;j++){
+            if((mabore->partition[j].start==0 && mabore->partition[j+1].start!=0)||mabore->partition[j].start>mabore->partition[j+1].start){
+                k=mabore->partition[j+1]; mabore->partition[j+1]=mabore->partition[j]; mabore->partition[j]=k;
+            }
+        }
+    }
+    return 0;
 }
 int add_part(int add, int unit, char path[256], char name[256]){
 
     return 0;
 }
 int del_part(char del[4], char path[256], char name[256]){
+    FILE *fich;
+    struct mbr mabore;
+    for(int i=1;i<strlen(path);i++)
+        if(path[i]==' ') path[i]='_';
+    if((fich = fopen(path,"rb+"))==NULL){
+        if(fich !=NULL) fclose(fich);
+        return errR("fdisk","cant open disk");
+    }
+    fread(&mabore,sizeof(mabore),1,fich);
+    if(del[1]='u'){
+        for(int i=0;i<4;i++){
+            if(strcmp(mabore.partition[i].name,name)==0){
+                int init=mabore.partition[i].start;
+                int tam=mabore.partition[i].size;
+                char UwU[tam];
+                for(int i=0;i<tam;i++)
+                    UwU[i]=0x0;
+                rewind(fich);
+                fseek(fich,init,SEEK_CUR);
+                fwrite(UwU,1,sizeof(UwU),fich);
 
+                mabore.partition[i].status=0;
+                mabore.partition[i].start=0;
+                mabore.partition[i].fit=0;
+                mabore.partition[i].size=0;
+                mabore.partition[i].type=0;
+                mabore.partition[i].name[0]=0;
+                struct Part k;
+                for(int i=1;i<5;i++){
+                    for(int j=0;j<4;j++){
+                        if((mabore.partition[j].start==0 && mabore.partition[j+1].start!=0)||mabore.partition[j].start>mabore.partition[j+1].start){
+                            k=mabore.partition[j+1]; mabore.partition[j+1]=mabore.partition[j]; mabore.partition[j]=k;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    else{
+        for(int i=0;i<4;i++){
+            if(strcpy(mabore.partition[i].name,name)){
+                mabore.partition[i].status=0;
+                mabore.partition[i].start=0;
+                mabore.partition[i].fit=0;
+                mabore.partition[i].size=0;
+                mabore.partition[i].type=0;
+                mabore.partition[i].name[0]=0;
+                struct Part k;
+                for(int i=1;i<5;i++){
+                    for(int j=0;j<4;j++){
+                        if((mabore.partition[j].start==0 && mabore.partition[j+1].start!=0)||mabore.partition[j].start>mabore.partition[j+1].start){
+                            k=mabore.partition[j+1]; mabore.partition[j+1]=mabore.partition[j]; mabore.partition[j]=k;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        errR("fdisk","no such partition exists");
+    }
+
+    escribir_mabore(&mabore,fich);
+    fclose(fich);
     return 0;
+}
+void escribir_mabore(struct mbr *mabore,FILE* fichero){
+    rewind(fichero);
+    fwrite(mabore,sizeof(*mabore),1,fichero);
 }
 
 
