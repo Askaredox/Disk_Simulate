@@ -8,8 +8,15 @@
 typedef enum { false, true } bool;
 struct stat st;
 
+struct Montaje{
+    char path[256];
+    char id[4][5];
+    char part[4][256];
+} mon[200];
+
 struct Part{
     int status;
+    bool mounted;
     char type;
     char fit;
     int start;
@@ -38,6 +45,7 @@ bool flag=true;
 char cmd[256];
 char err[256];
 char dat[256];
+int mon_num=0;
 
 void strip(char *str, int size );
 int analize(char *str);
@@ -46,6 +54,14 @@ int crear_disco(int size, char fit, int unit, char path[256]);
 int crear_part(int size, char fit, int unit, char type, char path[256], char name[256]);
 
 int main(){
+    for(int i=0;i<200;i++){
+        for(int j=0;j<4;j++){
+            limpiar(mon[i].part[j]);
+            for(int k=0;k<5;k++)
+                mon[i].id[j][k]=0;
+        }
+        limpiar(mon[i].path);
+    }
     while(flag){
         printf("$~:");
         gets(cmd,256,stdin);
@@ -132,20 +148,25 @@ int execute(char strs[20][256], int j){
 
     }
     else if(strcmp(strs[0],"rmdisk")==0){//eliminar disco
-        if(strcmp(strs[1],"-path")==0){
-            char dir[256];
-            quitar(dir, strs[2]);
-            int status;
-            for(int i=1;i<strlen(dir);i++)
-                if(dir[i]==' ') dir[i]='_';
-            if (stat(dir, &st) == -1)
-                status=remove(dir);
-            if(status==0){
-                printf("****************************** DISCO ELIMINADO ******************************\n\n");
+        char g;
+        printf("Are you sure to remove disk? (y/n)");
+        g=getchar();
+        if(g=='y' || g=='Y'){
+            if(strcmp(strs[1],"-path")==0){
+                char dir[256];
+                quitar(dir, strs[2]);
+                int status;
+                for(int i=1;i<strlen(dir);i++)
+                    if(dir[i]==' ') dir[i]='_';
+                if (stat(dir, &st) == -1)
+                    status=remove(dir);
+                if(status==0){
+                    printf("****************************** DISCO ELIMINADO ******************************\n\n");
+                }
+                else return errR(strs[0],"path of file not found");
             }
-            else return errR(strs[0],"path of file not found");
+            else return errR(strs[0],"parameter not found");
         }
-        else return errR(strs[0],"parameter not found");
     }
     else if(strcmp(strs[0],"fdisk")==0){//particiones disco
         int size=0;
@@ -184,7 +205,7 @@ int execute(char strs[20][256], int j){
                 else return errR(strs[0],"fit not valid");
             }
             else if(strcmp(strs[2*i-1],"-delete")==0){
-                exec='d';
+                if(exec=='c')exec='d';
                 if(strcmp(strs[2*i],"fast")==0) strcpy(del,"fast");
                 else if(strcmp(strs[2*i],"full")==0) strcpy(del,"full");
                 else return errR(strs[0],"fit not valid");
@@ -193,7 +214,7 @@ int execute(char strs[20][256], int j){
                 strcpy(name, strs[2*i]);
             }
             else if(strcmp(strs[2*i-1],"-add")==0){
-                exec='a';
+                if(exec=='c')exec='a';
                 add=strtol(strs[2*i], NULL,10);
             }
             else {
@@ -222,13 +243,23 @@ int execute(char strs[20][256], int j){
         }
     }
     else if(strcmp(strs[0],"mount")==0){//montar disco
-
+        char path[256];
+        char name[256];
+        for(int i=1;i<j+1;i++){
+            if(strcmp(strs[2*i-1],"-path")==0){
+                strcpy(path, strs[2*i]);
+            }
+            else if(strcmp(strs[2*i-1],"-name")==0){
+                strcpy(name, strs[2*i]);
+            }
+        }
     }
     else if(strcmp(strs[0],"unmount")==0){//desmontar disco
 
     }
     else if(strcmp(strs[0],"pause")==0){//pequeña pausa
-
+        printf("Press ENTER key to Continue\n");
+        getchar();
     }
     else if(strcmp(strs[0],"rep")==0){//reporte de discos
 
@@ -387,7 +418,6 @@ int crear_part(int size, char fit, int unit, char type, char path[256], char nam
     fclose(fich);
     return 0;
 }
-
 int set_pos(struct Part particion,struct mbr *mabore){
     int size_ant=sizeof(*mabore);
     if(mabore->fit=='F'){
@@ -466,14 +496,56 @@ int set_pos(struct Part particion,struct mbr *mabore){
     for(int i=1;i<5;i++){
         for(int j=0;j<4;j++){
             if((mabore->partition[j].start==0 && mabore->partition[j+1].start!=0)||mabore->partition[j].start>mabore->partition[j+1].start){
-                k=mabore->partition[j+1]; mabore->partition[j+1]=mabore->partition[j]; mabore->partition[j]=k;
+                if(mabore->partition[j+1].start!=0){
+                    k=mabore->partition[j+1]; mabore->partition[j+1]=mabore->partition[j]; mabore->partition[j]=k;
+                }
             }
         }
     }
     return 0;
 }
 int add_part(int add, int unit, char path[256], char name[256]){
+    FILE *fich;
+    struct mbr mabore;
+    for(unsigned int i=1;i<strlen(path);i++)
+        if(path[i]==' ') path[i]='_';
+    if((fich = fopen(path,"rb+"))==NULL){
+        if(fich !=NULL) fclose(fich);
+        return errR("fdisk","cant open disk");
+    }
+    fread(&mabore,sizeof(mabore),1,fich);
+    int temp;
+    if(unit==0) temp=1;
+    else if(unit==1)temp=1024;
+    else if(unit==2)temp=1024*1024;
 
+    if(add<0){//quitar memoria a particion
+        for(int i=0;i<4;i++){
+            if(strcmp(mabore.partition[i].name,name)==0){
+                if(mabore.partition[i].size+(add*temp)>0){
+                    mabore.partition[i].size+=(add*temp);
+                    break;
+                }
+                else errR("fdisk","cant remove that amount of memory");
+            }
+        }
+    }
+    else{//agregar memoria
+        for(int i=0;i<4;i++){
+            if(strcmp(mabore.partition[i].name,name)==0){
+                int temporal=0;
+                if(mabore.partition[i+1].status!=0)
+                    temporal=mabore.partition[i+1].start;
+                else
+                    temporal=mabore.size;
+                if(mabore.partition[i].size+add*temp<temporal){
+                    mabore.partition[i].size+=(add*temp);
+                    break;
+                }
+                else errR("fdisk","cant add that amount of memory");
+            }
+        }
+    }
     return 0;
 }
 int del_part(char del[4], char path[256], char name[256]){
@@ -486,7 +558,7 @@ int del_part(char del[4], char path[256], char name[256]){
         return errR("fdisk","cant open disk");
     }
     fread(&mabore,sizeof(mabore),1,fich);
-    if(del[1]='u'){
+    if(strcmp(del,"full")==0){
         for(int i=0;i<4;i++){
             if(strcmp(mabore.partition[i].name,name)==0){
                 int init=mabore.partition[i].start;
@@ -508,7 +580,9 @@ int del_part(char del[4], char path[256], char name[256]){
                 for(int i=1;i<5;i++){
                     for(int j=0;j<4;j++){
                         if((mabore.partition[j].start==0 && mabore.partition[j+1].start!=0)||mabore.partition[j].start>mabore.partition[j+1].start){
-                            k=mabore.partition[j+1]; mabore.partition[j+1]=mabore.partition[j]; mabore.partition[j]=k;
+                            if(mabore.partition[j+1].start!=0){
+                                k=mabore.partition[j+1]; mabore.partition[j+1]=mabore.partition[j]; mabore.partition[j]=k;
+                            }
                         }
                     }
                 }
@@ -517,19 +591,22 @@ int del_part(char del[4], char path[256], char name[256]){
         }
     }
     else{
-        for(int i=0;i<4;i++){
-            if(strcpy(mabore.partition[i].name,name)){
-                mabore.partition[i].status=0;
-                mabore.partition[i].start=0;
-                mabore.partition[i].fit=0;
-                mabore.partition[i].size=0;
-                mabore.partition[i].type=0;
-                mabore.partition[i].name[0]=0;
+        for(int ii=0;ii<4;ii++){
+            if(strcpy(mabore.partition[ii].name,name)){
+                mabore.partition[ii].status=0;
+                mabore.partition[ii].start=0;
+                mabore.partition[ii].fit=0;
+                mabore.partition[ii].size=0;
+                mabore.partition[ii].type=0;
+                for(int j=0;j<16;j++)
+                    mabore.partition[ii].name[j]=0;
                 struct Part k;
-                for(int i=1;i<5;i++){
-                    for(int j=0;j<4;j++){
+                for(int i=1;i<4;i++){
+                    for(int j=0;j<3;j++){
                         if((mabore.partition[j].start==0 && mabore.partition[j+1].start!=0)||mabore.partition[j].start>mabore.partition[j+1].start){
-                            k=mabore.partition[j+1]; mabore.partition[j+1]=mabore.partition[j]; mabore.partition[j]=k;
+                            if(mabore.partition[j+1].start!=0){
+                                k=mabore.partition[j+1]; mabore.partition[j+1]=mabore.partition[j]; mabore.partition[j]=k;
+                            }
                         }
                     }
                 }
@@ -543,7 +620,7 @@ int del_part(char del[4], char path[256], char name[256]){
     fclose(fich);
     return 0;
 }
-void escribir_mabore(struct mbr *mabore,FILE* fichero){
+void escribir_mabore(struct mbr *mabore,FILE *fichero){
     rewind(fichero);
     fwrite(mabore,sizeof(*mabore),1,fichero);
 }
