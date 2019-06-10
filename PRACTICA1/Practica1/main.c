@@ -606,43 +606,69 @@ int crear_part(int size, char fit, int unit, char type, char path[256], char nam
         return errR("fdisk","cant open disk");
     }
     fread(&mabore,sizeof(mabore),1,fich);
-    struct Part particion;
-    particion.status=1;
-    particion.type=type;
-    particion.fit=fit;
-    particion.mounted=false;
     int temp;
     if(unit==0) temp=1;
     else if(unit==1)temp=1024;
     else if(unit==2)temp=1024*1024;
-    particion.size=size*temp;
-    if(particion.type=='E')
+    if(type=='L'){
         for(int i=0;i<4;i++){
-            if(mabore.partition[i].type=='E')
-                return errR("fdisk","already an Expanded partition allocated");
+            if(mabore.partition[i].type=='E'){
+                struct ebr exbore;
+                exbore.fit=fit;
+                strcpy(exbore.name,name);
+                exbore.size=size*temp;
+                exbore.status=1;
+                put_ebr(&exbore,&mabore,fich,mabore.partition[i].start);
+                break;
+            }
         }
-    if(mabore.partition[3].status==1)
-        return errR("fdisk","already an 4 partitions allocated");
-    strcpy(particion.name,name);
-    if(set_pos(particion,&mabore)!=0){
-        return 1;
     }
-    //printf("fit: %c \n",mabore.fit);
-    //printf("id: %i \n",mabore.id);
-
+    else{
+        struct Part particion;
+        particion.status=1;
+        particion.type=type;
+        particion.fit=fit;
+        particion.mounted=false;
+        particion.size=size*temp;
+        if(particion.type=='E'){
+            for(int i=0;i<4;i++){
+                if(mabore.partition[i].type=='E')
+                    return errR("fdisk","already an Expanded partition allocated");
+            }
+        }
+        if(mabore.partition[3].status==1)
+            return errR("fdisk","already an 4 partitions allocated");
+        strcpy(particion.name,name);
+        if(set_pos(&particion,&mabore)!=0){
+            return 1;
+        }
+        if(particion.type=='E'){
+            struct ebr exbore;
+            exbore.fit='0';
+            strcpy(exbore.name,"LIBRE");
+            exbore.next=-1;
+            exbore.size=(particion.size)-sizeof(exbore);
+            exbore.start=particion.start;
+            exbore.status=0;
+            fseek(fich,particion.start,SEEK_SET);
+            fwrite(&exbore,sizeof(exbore),1,fich);
+        }
+        //printf("fit: %c \n",mabore.fit);
+        //printf("id: %i \n",mabore.id);
+    }
     escribir_mabore(&mabore,fich);
 
     fclose(fich);
     return 0;
 }
-int set_pos(struct Part particion,struct mbr *mabore){
+int set_pos(struct Part *particion,struct mbr *mabore){
     int size_ant=sizeof(*mabore);
     if(mabore->fit=='F'){
         for(int i=0;i<5;i++){
             if(mabore->partition[i].status!=0){
-                if(mabore->partition[i].start-size_ant>particion.size){
-                    particion.start=size_ant;
-                    mabore->partition[4]=particion;
+                if(mabore->partition[i].start-size_ant>particion->size){
+                    particion->start=size_ant;
+                    mabore->partition[4]=*particion;
                     break;
                 }
                 else{
@@ -650,9 +676,9 @@ int set_pos(struct Part particion,struct mbr *mabore){
                 }
             }
             else{
-                if(mabore->size-size_ant>particion.size){
-                    particion.start=size_ant;
-                    mabore->partition[4]=particion;
+                if(mabore->size-size_ant>particion->size){
+                    particion->start=size_ant;
+                    mabore->partition[4]=*particion;
                     break;
                 }
                 else{
@@ -666,22 +692,22 @@ int set_pos(struct Part particion,struct mbr *mabore){
         int start_space=size_ant;
         for(int i=0;i<5;i++){
             if(mabore->partition[i].status!=0){
-                if(mabore->partition[i].start-size_ant>particion.size && space<mabore->partition[i].start-size_ant){
+                if(mabore->partition[i].start-size_ant>particion->size && space<mabore->partition[i].start-size_ant){
                     space=mabore->partition[i].start-size_ant;
                     start_space=size_ant;
                 }
                 size_ant=mabore->partition[i].start+mabore->partition[i].size;
             }
             else{
-                if(mabore->size-size_ant>particion.size && space<mabore->size-size_ant){
+                if(mabore->size-size_ant>particion->size && space<mabore->size-size_ant){
                     space=mabore->size-size_ant;
                     start_space=size_ant;
                 }
             }
         }
         if(space!=0){
-            particion.start=start_space;
-            mabore->partition[4]=particion;
+            particion->start=start_space;
+            mabore->partition[4]=*particion;
         }
         else return errR("fdisk","not enough space in disk");
     }
@@ -690,22 +716,22 @@ int set_pos(struct Part particion,struct mbr *mabore){
         int start_space=size_ant;
         for(int i=0;i<5;i++){
             if(mabore->partition[i].status!=0){
-                if(mabore->partition[i].start-size_ant>particion.size && space>mabore->partition[i].start-size_ant){
+                if(mabore->partition[i].start-size_ant>particion->size && space>mabore->partition[i].start-size_ant){
                     space=mabore->partition[i].start-size_ant;
                     start_space=size_ant;
                 }
                 size_ant=mabore->partition[i].start+mabore->partition[i].size;
             }
             else{
-                if(mabore->size-size_ant>particion.size && space>mabore->size-size_ant){
+                if(mabore->size-size_ant>particion->size && space>mabore->size-size_ant){
                     space=mabore->size-size_ant;
                     start_space=size_ant;
                 }
             }
         }
         if(space!=0x7fffffff){
-            particion.start=start_space;
-            mabore->partition[4]=particion;
+            particion->start=start_space;
+            mabore->partition[4]=*particion;
         }
         else return errR("fdisk","not enough space in disk");
     }
@@ -905,7 +931,65 @@ void do_mbr_graph(struct mbr *mabore,FILE *rep,char text[256],char png[256]){
         }
     }
 
-    graph=concat(graph,"</TABLE>\n>];\n}");
+
+    for(int i=0;i<4;i++){
+        if(mabore->partition[i].type=='E'){
+            FILE *fich;
+            struct ebr exbore;
+            for(int i=1;i<strlen(path);i++)
+                if(path[i]==' ') path[i]='_';
+            if((fich = fopen(path,"rb+"))==NULL){
+                if(fich !=NULL) fclose(fich);
+                return errR("fdisk","cant open disk");
+            }
+            fseek(fich,mabore->partition[i].start,SEEK_SET);
+            fread(&exbore,sizeof(exbore),1,fich);
+            graph=concat(graph,"</TABLE>\n>];\n\n");
+            graph=concat(graph,"ebr [shape=none, margin=0, label=<\n<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\" CELLPADDING=\"4\">\n");
+            graph=concat(graph,"<TR><td>Nombre</td><td>Valor</td></TR>\n");
+            int ii=1;
+            while(exbore.next!=-1){
+                graph=concat(graph,"<TR>\n");
+                graph=concat(graph,"<Td>part_status_");cl(tempo);sprintf(tempo,"%d</Td>\n",ii);graph=concat(graph,tempo);
+                cl(tempo);sprintf(tempo,"<Td>%d</Td>",exbore.status);graph=concat(graph,tempo);
+                graph=concat(graph,"</TR>\n");
+
+                graph=concat(graph,"<TR>\n");
+                graph=concat(graph,"<Td>part_fit_");cl(tempo);sprintf(tempo,"%d</Td>\n",ii);graph=concat(graph,tempo);
+                cl(tempo);strcpy(tempo,"<td>");tempo[4]=exbore.fit;graph=concat(graph,tempo);
+                graph=concat(graph,"</td>\n</TR>\n");
+
+                graph=concat(graph,"<TR>\n");
+                graph=concat(graph,"<Td>part_start_");cl(tempo);sprintf(tempo,"%d</Td>\n",ii);graph=concat(graph,tempo);
+                cl(tempo);sprintf(tempo,"<Td>%d</Td>",exbore.start);graph=concat(graph,tempo);
+                graph=concat(graph,"</TR>\n");
+
+                graph=concat(graph,"<TR>\n");
+                graph=concat(graph,"<Td>part_size_");cl(tempo);sprintf(tempo,"%d</Td>\n",ii);graph=concat(graph,tempo);
+                cl(tempo);sprintf(tempo,"<Td>%d</Td>",exbore.size);graph=concat(graph,tempo);
+                graph=concat(graph,"</TR>\n");
+
+                graph=concat(graph,"<TR>\n");
+                graph=concat(graph,"<Td>part_next_");cl(tempo);sprintf(tempo,"%d</Td>\n",ii);graph=concat(graph,tempo);
+                cl(tempo);sprintf(tempo,"<Td>%d</Td>",exbore.next);graph=concat(graph,tempo);
+                graph=concat(graph,"</TR>\n");
+
+                graph=concat(graph,"<TR>\n");
+                graph=concat(graph,"<Td>part_name_");cl(tempo);sprintf(tempo,"%d</Td>\n<td>",ii);graph=concat(graph,tempo);
+                graph=concat(graph,exbore.name);
+                graph=concat(graph,"</td>\n</TR>\n");
+
+                fseek(fich,exbore.next,SEEK_SET);
+                fread(&exbore,sizeof(exbore),1,fich);
+
+            }
+            graph=concat(graph,"</TABLE>\n>];\n}");
+            fclose(fich);
+            break;
+        }
+    }
+
+
     fwrite(graph,1,strlen(graph),rep);
     fclose(rep);
     char temp[256];
@@ -917,8 +1001,7 @@ void do_mbr_graph(struct mbr *mabore,FILE *rep,char text[256],char png[256]){
     char temp2[256];
     remove(text);
 }
-char* concat(const char *s1, const char *s2)
-{
+char* concat(const char *s1, const char *s2){
     char *result = malloc(strlen(s1) + strlen(s2) + 1); // +1 for the null-terminator
     strcpy(result, s1);
     strcat(result, s2);
@@ -991,6 +1074,62 @@ void do_disk_graph(struct mbr *mabore,FILE *rep,char text[256],char png[256]){
     char temp2[256];
     remove(text);
 }
+int put_ebr(struct ebr *exbore,struct mbr *mabore, FILE *fich, int start){
+    /* exbore -> nuevo
+     * mabore -> mbr
+     * fich -> fichero
+     * start -> comienza extendida
+     * temp -> ebr existente if(-1)no hay siguiente
+     * ss -> siguiente ebr
+     */
+    struct ebr temp;
+    fseek(fich,start,SEEK_SET);
+    fread(&temp,sizeof(temp),1,fich);
+    int ss=temp.next;
+    while(ss!=-1){
+        if(exbore->fit=='F'){
+            if(temp.status==0 && temp.size>exbore->size){
+                exbore->start=temp.start;
+                exbore->next=ss;
+                fseek(fich,exbore->start,SEEK_SET);
+                fwrite(exbore,sizeof(*exbore),1,fich);
+                break;
+            }
+            else{
+                fseek(fich,ss,SEEK_SET);
+                fread(&temp,sizeof(temp),1,fich);
+                ss=temp.next;
+            }
+        }
+        else if(exbore->fit=='B'){
+            //best fit
+        }
+        else{
+            //worst fit
+        }
+    }
+    if(temp.size>exbore->size){
+        exbore->start=temp.start;
+        exbore->next=temp.start+temp.size;
+        struct ebr siguiente={0,0,exbore->next,temp.size-exbore->size,-1,"LIBRE"};
+        fseek(fich,exbore->start,SEEK_SET);
+        fwrite(exbore,sizeof(*exbore),1,fich);
+        fseek(fich,siguiente.start,SEEK_SET);
+        fwrite(&siguiente,sizeof(siguiente),1,fich);
+    }
+    else return errR("fdisk","doesnt have enough space for logic partition");
+    return 0;
+}
 
-
-
+/*struct ebr{
+    int status;
+    char fit;
+    int start;
+    int size;
+    int next;
+    char name[16];
+};
+ *
+ *
+ *
+ */
